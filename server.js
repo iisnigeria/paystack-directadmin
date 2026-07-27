@@ -25,15 +25,35 @@ app.post('/paystack-webhook', async (req, res) => {
 
     const event = req.body;
 
-    if (event.event === 'charge.success') {
+    // Trigger on successful charge or successful subscription creation
+    if (event.event === 'charge.success' || event.event === 'subscription.create') {
         const customerEmail = event.data.customer.email;
         const metadata = event.data.metadata || {};
         
+        // 1. Get the domain name typed by the customer in the extra field
+        let domain = '';
+        if (metadata.custom_fields && metadata.custom_fields.length > 0) {
+            const domainField = metadata.custom_fields.find(f => f.variable_name === 'domain' || f.display_name.toLowerCase() === 'domain');
+            if (domainField) domain = domainField.value;
+        }
+
+        // 2. Automatically get the Plan Name directly from Paystack's Subscription settings
+        let packagePlan = 'Default';
+        if (event.data.plan && event.data.plan.name) {
+            packagePlan = event.data.plan.name; // This grabs "Test", "Essential", etc.
+        } else if (metadata.plan_package) {
+            packagePlan = metadata.plan_package;
+        }
+
         // Clean up email to generate a standard unique username
         const baseUser = customerEmail.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
         const username = baseUser.substring(0, 8) + Math.floor(100 + Math.random() * 900);
-        const domain = metadata.domain || `${username}.com`;
-        const packagePlan = metadata.plan_package || 'Default'; 
+        
+        if (!domain) {
+            domain = `${username}.com`;
+        }
+
+        console.log(`Attempting to provision Plan: "${packagePlan}" for Domain: "${domain}"`);
 
         try {
             const password = crypto.randomBytes(6).toString('hex') + 'A1!';
@@ -44,7 +64,7 @@ app.post('/paystack-webhook', async (req, res) => {
                 passwd: password,
                 passwd2: password,
                 domain: domain,
-                package: packagePlan,
+                package: packagePlan, // Matches your exact DirectAdmin package name
                 ip: 'shared',
                 notify: 'yes'
             });
